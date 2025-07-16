@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generador de PRDs e Historias de Usuario</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
+        .container { max-width: 900px; margin: auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); }
+        h1 { color: #0056b3; text-align: center; }
+        textarea { width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px; resize: vertical; }
+        button { background-color: #007bff; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+        button:hover { background-color: #0056b3; }
+        .chat-area { border: 1px solid #eee; padding: 15px; background: #fafafa; border-radius: 4px; min-height: 200px; max-height: 400px; overflow-y: auto; margin-bottom: 20px; }
+        .response-area { border: 1px solid #ccc; padding: 15px; background: #e9e9e9; border-radius: 4px; white-space: pre-wrap; font-family: monospace; }
+        .message-user { text-align: right; color: #007bff; }
+        .message-ai { text-align: left; color: #28a745; }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Generador de PRDs e Historias de Usuario</h1>
+
+        <p>Por favor, introduce la ruta del directorio de tu proyecto local:</p>
+        <input type="text" id="projectPathInput" placeholder="Ej: /Users/tu_usuario/mis_proyectos/mi_proyecto_app" style="width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px;">
+
+        <div style="margin-bottom: 10px;">
+            <input type="checkbox" id="forceIndex">
+            <label for="forceIndex">Forzar re-indexación del proyecto (borrar datos existentes)</label>
+        </div>
+
+        <p>Selecciona el tipo de documento a generar:</p>
+        <select id="templateTypeInput" onchange="handleTemplateChange()" style="width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px;">
+            <option value="feature.md">Feature (PRD y HU)</option>
+            <option value="bug.md">Bug</option>
+            <option value="work.md">Work</option>
+            <option value="prd.md">PRD (nuevo documento)</option>
+            <option value="prd_feature_existing">PRD Feature (desde PRD existente)</option>
+        </select>
+
+        <div id="existingPrdSection" class="hidden" style="margin-bottom: 10px;">
+            <p>Pega aquí el contenido del PRD existente:</p>
+            <textarea id="existingPrdContent" rows="10" placeholder="Copia y pega tu PRD completo aquí..."></textarea>
+        </div>
+
+        <div id="functionalityDescriptionSection">
+            <p>Por favor, describe la funcionalidad que deseas generar el PRD/Historia de Usuario:</p>
+            <textarea id="functionalityInput" rows="5" placeholder="Ej: 'Quiero una funcionalidad de registro de usuarios que valide emails y almacene contraseñas encriptadas.'"></textarea>
+        </div>
+
+        <p>Selecciona el proveedor de LLM:</p>
+        <select id="llmProviderInput" style="width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px;">
+            <option value="google">Google (Gemini)</option>
+            <option value="ollama">Ollama (Llama3)</option>
+        </select>
+
+        <button onclick="startConversation()">Iniciar Conversación</button>
+
+        <h2>Chat con la IA</h2>
+        <div class="chat-area" id="chatArea">
+            <!-- Mensajes del chat se añadirán aquí -->
+        </div>
+        <textarea id="chatInput" rows="2" placeholder="Escribe tu respuesta aquí..." style="display: none;"></textarea>
+        <button id="sendButton" onclick="sendMessage()" style="display: none;">Enviar</button>
+        <button id="generateNowButton" onclick="generateDocuments()" style="margin-top: 10px; display: none;">Generar Documentos Ahora</button>
+        <div id="chatInstructions" style="font-size: 0.9em; color: #666; margin-top: 5px; display: none;">
+            Tip: Puedes hacer clic en "Generar Documentos Ahora" en cualquier momento para proceder.
+        </div>
+
+        <h2>PRD y Historias de Usuario Generadas</h2>
+        <div class="response-area" id="prdOutput">
+            <!-- PRD se mostrará aquí -->
+        </div>
+        <button onclick="copyToClipboard('prdOutput')" style="margin-top: 10px;">Copiar PRD</button>
+
+        <div class="response-area" id="userStoriesOutput" style="margin-top: 20px;">
+            <!-- Historias de Usuario se mostrarán aquí -->
+        </div>
+        <button onclick="copyToClipboard('userStoriesOutput')" style="margin-top: 10px;">Copiar Historias de Usuario</button>
+    </div>
+
+    <script>
+        const functionalityInput = document.getElementById('functionalityInput');
+        const chatArea = document.getElementById('chatArea');
+        const chatInput = document.getElementById('chatInput');
+        const sendButton = document.getElementById('sendButton');
+        const prdOutput = document.getElementById('prdOutput');
+        const userStoriesOutput = document.getElementById('userStoriesOutput');
+        const projectPathInput = document.getElementById('projectPathInput');
+        const templateTypeInput = document.getElementById('templateTypeInput');
+        const forceIndexCheckbox = document.getElementById('forceIndex');
+        const existingPrdSection = document.getElementById('existingPrdSection');
+        const existingPrdContentInput = document.getElementById('existingPrdContent');
+        const functionalityDescriptionSection = document.getElementById('functionalityDescriptionSection'); // <--- AÑADIR ESTA LÍNEA
+        const llmProviderInput = document.getElementById('llmProviderInput'); // Add this line
+
+        const generateNowButton = document.getElementById('generateNowButton'); // Add this line
+        const chatInstructions = document.getElementById('chatInstructions'); // Add this line
+
+
+        let conversationHistory = [];
+        let currentStep = 0; // Para simular los pasos de la conversación
+        let indexedProjectPath = ''; // Para almacenar la ruta del proyecto indexado
+
+        // <--- AÑADIR ESTA FUNCIÓN PARA MANEJAR EL CAMBIO DE TEMPLATE -->
+        function handleTemplateChange() {
+            const selectedTemplate = templateTypeInput.value;
+            if (selectedTemplate === 'prd_feature_existing') {
+                existingPrdSection.classList.remove('hidden');
+                functionalityDescriptionSection.classList.add('hidden'); // <--- AÑADIR ESTA LÍNEA
+                functionalityInput.value = ''; // Limpiar el contenido
+            } else {
+                existingPrdSection.classList.add('hidden');
+                existingPrdContentInput.value = ''; // Limpiar el contenido si se oculta
+                functionalityDescriptionSection.classList.remove('hidden'); // <--- AÑADIR ESTA LÍNEA
+            }
+        }
+        // <--- Asegurarse de que la función se ejecute al cargar la página por primera vez
+        document.addEventListener('DOMContentLoaded', handleTemplateChange);
+        // <--- FIN DE LA FUNCIÓN handleTemplateChange -->
+
+
+        async function startConversation() {
+            const projectPath = projectPathInput.value;
+            const forceIndex = forceIndexCheckbox.checked;
+            
+            if (!projectPath) {
+                alert('Por favor, ingresa la ruta del directorio de tu proyecto.');
+                return;
+            }
+            indexedProjectPath = projectPath; // Almacenar la ruta para futuras llamadas
+
+            const templateType = templateTypeInput.value;
+            const initialDescription = functionalityInput.value;
+            const existingPrdContent = existingPrdContentInput.value;
+
+            // Validaciones adicionales para "PRD Feature"
+            if (templateType === 'prd_feature_existing' && !existingPrdContent) {
+                alert('Para "PRD Feature", por favor, pega el contenido del PRD existente.');
+                return;
+            }
+
+            if (!initialDescription && templateType !== 'prd_feature_existing') {
+                alert('Por favor, ingresa una descripción de la funcionalidad.');
+                return;
+            }
+
+
+            // Deshabilitar inputs y botones mientras se procesa
+            functionalityInput.disabled = true;
+            document.querySelector('button').disabled = true;
+            projectPathInput.disabled = true;
+            templateTypeInput.disabled = true;
+            forceIndexCheckbox.disabled = true;
+            existingPrdContentInput.disabled = true;
+
+
+            // Simular indexación (ahora será una llamada al backend real)
+            appendMessage('IA', 'Iniciando indexación del proyecto...');
+            
+            try {
+                const response = await fetch('/index_project', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ 
+                        project_path: projectPath,
+                        force_index: forceIndex
+                    }),
+                });
+                const result = await response.json();
+                if (response.ok) {
+                    appendMessage('IA', result.message);
+                } else {
+                    appendMessage('IA', `Error en la indexación: ${result.detail}`);
+                    // Optionally re-enable inputs for correction
+                    functionalityInput.disabled = false;
+                    document.querySelector('button').disabled = false;
+                    projectPathInput.disabled = false;
+                    templateTypeInput.disabled = false;
+                    forceIndexCheckbox.disabled = false;
+                    existingPrdContentInput.disabled = false;
+                    return;
+                }
+            } catch (error) {
+                appendMessage('IA', `Error al conectar con el servidor para la indexación: ${error.message}`);
+                functionalityInput.disabled = false;
+                document.querySelector('button').disabled = false;
+                projectPathInput.disabled = false;
+                templateTypeInput.disabled = false;
+                forceIndexCheckbox.disabled = false;
+                existingPrdContentInput.disabled = false;
+                return;
+            }
+
+            // --- Nueva sección: Iniciar conversación con la IA a través del backend ---
+            appendMessage('IA', 'Iniciando conversación con la IA...');
+            try {
+                const response = await fetch('/start_conversation', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        initial_description: initialDescription,
+                        template_type: templateType,
+                        existing_prd_content: existingPrdContent,
+                        llm_provider: llmProviderInput.value // Pass the selected LLM provider
+                    })
+                });
+                const result = await response.json();
+
+                if (response.ok) {
+                    // AI's first question is in result.message
+                    appendMessage('IA', result.message);
+                    chatInput.style.display = 'block';
+                    sendButton.style.display = 'block';
+                    generateNowButton.style.display = 'block'; // Show generate button
+                    chatInstructions.style.display = 'block'; // Show instructions
+                } else {
+                    appendMessage('IA', `Error al iniciar conversación: ${result.message}`);
+                    // Re-enable inputs for correction if starting conversation fails
+                    functionalityInput.disabled = false;
+                    document.querySelector('button').disabled = false;
+                    projectPathInput.disabled = false;
+                    templateTypeInput.disabled = false;
+                    forceIndexCheckbox.disabled = false;
+                    existingPrdContentInput.disabled = false;
+                }
+            } catch (error) {
+                appendMessage('IA', `Error de conexión al iniciar conversación: ${error.message}`);
+                functionalityInput.disabled = false;
+                document.querySelector('button').disabled = false;
+                projectPathInput.disabled = false;
+                templateTypeInput.disabled = false;
+                forceIndexCheckbox.disabled = false;
+                existingPrdContentInput.disabled = false;
+            }
+            // --- Fin de la nueva sección ---
+
+            // Eliminar estas líneas ya que la conversación se inicializa en el backend
+            // conversationHistory = [{ 
+            //     role: 'pm', 
+            //     content: initialDescription,
+            //     template_type: templateType,
+            //     existing_prd_content: existingPrdContent
+            // }];
+            // appendMessage('PM', initialDescription);
+
+            // functionalityInput.disabled = true;
+            // document.querySelector('button').disabled = true; // Deshabilita el botón "Iniciar Conversación"
+            // projectPathInput.disabled = true;
+            // templateTypeInput.disabled = true;
+            // forceIndexCheckbox.disabled = true;
+            // existingPrdContentInput.disabled = true;
+
+
+            // chatInput.style.display = 'block';
+            // sendButton.style.display = 'block';
+
+            // Modificar esta llamada para enviar contexto al chat dinámico
+            // await getNextQuestionFromAI(); // Ya no se llama directamente aquí, la primera pregunta viene de /start_conversation
+        }
+
+        function appendMessage(sender, text) {
+            const msgElement = document.createElement('p');
+            msgElement.className = `message-${sender.toLowerCase()}`;
+            msgElement.textContent = `${sender}: ${text}`;
+            chatArea.appendChild(msgElement);
+            chatArea.scrollTop = chatArea.scrollHeight; // Scroll al final
+        }
+
+        // <--- MODIFICAR ESTA FUNCIÓN PARA HACER LLAMADA REAL AL BACKEND PARA PREGUNTAS -->
+        async function getNextQuestionFromAI() {
+            // Esta función ya no se usará para la primera pregunta, sino para subsiguientes preguntas de la IA
+            // después de que el usuario envíe un mensaje.
+            // Su lógica se moverá o adaptará dentro de sendMessage().
+            console.warn("getNextQuestionFromAI debería ser llamada solo internamente por sendMessage ahora.");
+        }
+        // <--- FIN DE LA FUNCIÓN MODIFICADA -->
+
+
+        async function sendMessage() {
+            const userResponse = chatInput.value;
+            if (!userResponse) return;
+
+            // La conversación se maneja en el backend, solo enviamos la respuesta del usuario.
+            // No necesitamos appendMessage('PM', userResponse) aquí, ya que el backend maneja el historial.
+            // Sin embargo, para una mejor experiencia de usuario, podríamos mostrarlo inmediatamente.
+            appendMessage('PM', userResponse);
+
+            chatInput.value = ''; // Limpiar el input inmediatamente después de enviar
+
+            // Enviar la respuesta del usuario al backend y obtener la siguiente pregunta de la IA
+            try {
+                const response = await fetch('/send_message', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        session_id: 'default_user_session', // Keep session fixed for now
+                        user_message: userResponse, // Send user response
+                        llm_provider: llmProviderInput.value // Pass the selected LLM provider
+                    }),
+                });
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    const aiQuestion = result.ai_response;
+                    appendMessage('IA', aiQuestion);
+                    // The AI will indicate when it's ready to generate documents. User can click button.
+                    if (aiQuestion.includes('generar los documentos')) {
+                        // The button will be used by the user to finalize the process
+                    }
+                } else {
+                    appendMessage('IA', `Error al enviar mensaje: ${result.message}`);
+                }
+            } catch (error) {
+                appendMessage('IA', `Error de conexión al enviar mensaje: ${error.message}`);
+            }
+        }
+        // <--- FIN DE LA FUNCIÓN MODIFICADA -->
+
+        async function generateDocuments() {
+            const response = await fetch('/generate_documents', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    session_id: 'default_user_session',
+                    template_type: templateTypeInput.value,
+                    existing_prd_content: existingPrdContentInput.value,
+                    llm_provider: llmProviderInput.value // <--- AÑADIR ESTA LÍNEA
+                }),
+            });
+            const result = await response.json();
+
+            if (result.status === 'success') {
+                prdOutput.textContent = result.prd;
+                userStoriesOutput.textContent = result.user_stories;
+                appendMessage('IA', '¡Documentos generados! Puedes copiarlos o descargarlos.');
+            } else {
+                prdOutput.textContent = `Error: ${result.message}`;
+                userStoriesOutput.textContent = `Error: ${result.message}`;
+                appendMessage('IA', `Error al generar documentos: ${result.message}`);
+            }
+        }
+
+        function copyToClipboard(elementId) {
+            const element = document.getElementById(elementId);
+            const text = element.textContent;
+            navigator.clipboard.writeText(text).then(() => {
+                alert('Contenido copiado al portapapeles.');
+            }).catch(err => {
+                console.error('Error al copiar: ', err);
+            });
+        }
+    </script>
+</body>
+</html> 

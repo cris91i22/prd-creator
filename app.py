@@ -126,50 +126,51 @@ async def get_next_chat_question(conversation_history: List[Dict[str, str]], pro
     """
     llm = _get_llm(llm_provider)
 
-    base_prompt_content = _load_template_content("templates/prompts/base_chat_prompt.txt")
-    base_prompt = PromptTemplate(base_prompt_content)
+    # Initialize as string, not PromptTemplate
+    full_prompt_content_string = _load_template_content("templates/prompts/base_chat_prompt.txt")
 
     if _is_initial_conversation_state(conversation_history):
         # Si es el inicio de la conversación o solo el primer mensaje del PM
         if template_type == 'prd_feature_existing':
-            base_prompt += f"""
+            full_prompt_content_string += f"""
             El PM ha proporcionado el siguiente contenido de PRD existente:
             {existing_prd_content}
             Tu objetivo es ayudar a desglosar este PRD en Historias de Usuario detalladas.
             Para empezar, ¿en qué funcionalidades o secciones del PRD existente deberíamos enfocarnos para generar las Historias de Usuario?
             """
         elif template_type == 'prd.md' or template_type == 'feature.md':
-            base_prompt += """
+            full_prompt_content_string += """
             Para empezar, ¿cuál es el problema principal que esta funcionalidad busca resolver para el usuario, o cuál es el objetivo principal que queremos lograr con esta nueva característica?
             """
         else:
             # Default for other templates if needed
-            base_prompt += """
+            full_prompt_content_string += """
             Para empezar, ¿cuál es el problema o el objetivo principal de lo que estamos discutiendo?
             """
     else:
         if template_type == 'prd_feature_existing':
             # Adaptar el prompt para el caso de PRD Feature
-            base_prompt += f"""
+            full_prompt_content_string += f"""
             El PM ha proporcionado el siguiente contenido de PRD existente:
             {existing_prd_content}
             Tu objetivo es ayudar a desglosar este PRD en Historias de Usuario detalladas.
             """
         elif template_type == 'prd.md':
-            base_prompt += """
+            full_prompt_content_string += """
             Tu objetivo es recopilar suficiente información para generar un PRD completamente nuevo.
             """
         elif template_type == 'feature.md': # This is the default behavior.
-            base_prompt += """
+            full_prompt_content_string += """
             Tu objetivo es recopilar suficiente información para generar un PRD y Historias de Usuario para una nueva funcionalidad.
             """
         # Add other template type specific instructions here if needed
 
-    base_prompt += """
+    full_prompt_content_string += """
         Siguiente pregunta para el PM:
         """
 
-    prompt_template = PromptTemplate(base_prompt)
+    # Create PromptTemplate from the final string
+    prompt_template = PromptTemplate(full_prompt_content_string)
 
     relevant_project_info = _get_relevant_project_info(project_index, conversation_history, "formular la siguiente pregunta al PM")
 
@@ -351,6 +352,114 @@ async def generate_technical_plan(conversation_history: List[Dict[str, str]], pr
 
     print("Plan Técnico generado (usando LLM)...")
     return technical_plan_content
+
+# --- Fase 4: Chat de Desarrolladores y Resumen para Jira ---
+
+async def get_developer_chat_response(
+    developer_chat_history: List[Dict[str, str]],
+    project_index,
+    prd_content: str,
+    user_stories_content: str,
+    technical_plan_content: str,
+    llm_provider: str = "google"
+) -> str:
+    """
+    Genera una respuesta para el chat del desarrollador, usando el PRD, las Historias de Usuario,
+    el Plan Técnico y el índice del proyecto como contexto.
+    """
+    print("\n--- Generando respuesta para el chat del desarrollador ---")
+
+    llm = _get_llm(llm_provider)
+    
+    # Cargar el prompt específico para el chat del desarrollador
+    developer_chat_prompt_content = _load_template_content("templates/prompts/developer_chat_prompt.txt")
+    developer_chat_template = PromptTemplate(developer_chat_prompt_content)
+
+    # Contexto relevante del proyecto (usando una consulta más específica para desarrolladores)
+    relevant_project_info = _get_relevant_project_info(project_index, developer_chat_history, "responder preguntas técnicas sobre la implementación de la propuesta")
+
+    full_prompt_text = developer_chat_template.format(
+        developer_chat_context="\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in developer_chat_history]),
+        prd_content=prd_content,
+        user_stories_content=user_stories_content,
+        technical_plan_content=technical_plan_content,
+        project_info=relevant_project_info
+    )
+
+    try:
+        llm_response = await llm.acomplete(full_prompt_text)
+        return llm_response.text.strip()
+    except Exception as e:
+        print(f"DEBUG: Error al generar respuesta para el chat del desarrollador - Tipo: {type(e).__name__}, Mensaje: {e}")
+        return f"Error al generar la respuesta para el chat del desarrollador con el LLM: {str(e)}. Por favor, verifica tu clave de API y la disponibilidad del modelo."
+
+
+async def summarize_developer_chat(
+    developer_chat_history: List[Dict[str, str]],
+    llm_provider: str = "google"
+) -> str:
+    """
+    Genera un resumen conciso del chat del desarrollador para un ticket de Jira.
+    """
+    print("\n--- Generando resumen del chat del desarrollador para Jira ---")
+
+    llm = _get_llm(llm_provider)
+
+    # Cargar el prompt específico para el resumen de Jira
+    jira_summary_prompt_content = _load_template_content("templates/prompts/jira_summary_prompt.txt")
+    jira_summary_template = PromptTemplate(jira_summary_prompt_content)
+
+    # Preparar el contexto del chat para el resumen
+    chat_context_for_summary = "\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in developer_chat_history])
+
+    full_prompt_text = jira_summary_template.format(
+        developer_chat_context=chat_context_for_summary
+    )
+
+    try:
+        llm_response = await llm.acomplete(full_prompt_text)
+        return llm_response.text.strip()
+    except Exception as e:
+        print(f"DEBUG: Error al generar resumen para Jira - Tipo: {type(e).__name__}, Mensaje: {e}")
+        return f"Error al generar el resumen para Jira con el LLM: {str(e)}. Por favor, verifica tu clave de API y la disponibilidad del modelo."
+
+async def generate_code_agent_brief(
+    developer_chat_history: List[Dict[str, str]],
+    project_index,
+    prd_content: str,
+    user_stories_content: str,
+    technical_plan_content: str,
+    llm_provider: str = "google"
+) -> str:
+    """
+    Genera un brief detallado y optimizado para un agente de IA generador de código,
+    incluyendo todo el contexto relevante para la implementación.
+    """
+    print("\n--- Generando brief para el agente de código ---")
+
+    llm = _get_llm(llm_provider)
+
+    # Cargar el prompt específico para el brief del agente de código
+    code_agent_brief_prompt_content = _load_template_content("templates/prompts/code_agent_brief_prompt.txt")
+    code_agent_brief_template = PromptTemplate(code_agent_brief_prompt_content)
+
+    # Contexto relevante del proyecto (usando una consulta más específica para la implementación de código)
+    relevant_project_info = _get_relevant_project_info(project_index, developer_chat_history, "generar código para la implementación")
+
+    full_prompt_text = code_agent_brief_template.format(
+        developer_chat_context="\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in developer_chat_history]),
+        prd_content=prd_content,
+        user_stories_content=user_stories_content,
+        technical_plan_content=technical_plan_content,
+        project_info=relevant_project_info
+    )
+
+    try:
+        llm_response = await llm.acomplete(full_prompt_text)
+        return llm_response.text.strip()
+    except Exception as e:
+        print(f"DEBUG: Error al generar brief para agente de código - Tipo: {type(e).__name__}, Mensaje: {e}")
+        return f"Error al generar el brief para el agente de código con el LLM: {str(e)}. Por favor, verifica tu clave de API y la disponibilidad del modelo."
 
 
 if __name__ == "__main__":

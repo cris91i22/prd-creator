@@ -1,0 +1,9 @@
+A partir del siguiente historial de chat entre un desarrollador y una IA, genera un resumen conciso de las preguntas clave y las soluciones o aclaraciones técnicas proporcionadas. Este resumen será utilizado para documentar las averiguaciones en un ticket de Jira.
+
+---
+**Historial del Chat del Desarrollador:**
+{developer_chat_context}
+
+---
+
+Resumen para Jira (centrado en dudas de implementación y soluciones): 

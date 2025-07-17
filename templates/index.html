@@ -5,8 +5,51 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Generador de PRDs e Historias de Usuario</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; color: #333; }
-        .container { max-width: 900px; margin: auto; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); }
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 0; 
+            background-color: #f4f4f4; 
+            color: #333; 
+            display: grid; /* Use grid for main layout */
+            grid-template-columns: minmax(0, 1fr) 2fr minmax(0, 1fr); /* Three columns: left sidebar, main, right sidebar */
+            gap: 20px; /* Space between columns */
+            padding: 20px;
+            min-height: 100vh; /* Ensure it takes full viewport height */
+        }
+        .container { 
+            background: #fff; 
+            padding: 20px; 
+            border-radius: 8px; 
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); 
+            grid-column: 2; /* Main content in the second column */
+        }
+        .sidebar {
+            background: #e6f7ff; /* Light blue background for sidebars */
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            overflow-y: auto; /* Enable scrolling for long content */
+            max-height: calc(100vh - 40px); /* Adjust height to fit viewport */
+            position: sticky; /* Make the sidebar sticky */
+            top: 20px; /* Stick to 20px from the top of the viewport */
+            align-self: start; /* Align to the start of the grid cell to allow sticky to work */
+        }
+        .sidebar h3 {
+            color: #0056b3;
+            margin-top: 0;
+            border-bottom: 1px solid #cceeff;
+            padding-bottom: 10px;
+            margin-bottom: 10px;
+        }
+        .sidebar-item {
+            padding: 5px;
+            margin-bottom: 3px;
+            cursor: pointer;
+            border-radius: 3px;
+        }
+        .sidebar-item:hover {
+            background-color: #cceeff; /* Lighter blue on hover */
+        }
         h1 { color: #0056b3; text-align: center; }
         textarea { width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px; resize: vertical; }
         button { background-color: #007bff; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
@@ -21,6 +64,13 @@
     </style>
 </head>
 <body>
+    <!-- Left Sidebar for PRD and User Stories -->
+    <div id="leftSidebar" class="sidebar hidden" style="grid-column: 1;">
+        <h3>PRD y Historias de Usuario</h3>
+        <div id="prdLinesContainer"></div>
+        <div id="userStoriesLinesContainer" style="margin-top: 20px;"></div>
+    </div>
+
     <div class="container">
         <h1>Generador de PRDs e Historias de Usuario</h1>
 
@@ -86,8 +136,41 @@
             <!-- Plan Técnico se mostrará aquí -->
         </div>
         <button onclick="copyToClipboard('technicalPlanOutput')" style="margin-top: 10px;">Copiar Plan Técnico</button>
+
+        <!-- Nueva Sección: Chat con IA para Desarrolladores -->
+        <h2 style="margin-top: 40px;">Chat de Ayuda para Desarrolladores (Opcional)</h2>
+        <div id="developerChatSection" class="hidden">
+            <p>Haz preguntas técnicas sobre el PRD, HUs, Plan Técnico y el código para obtener ayuda con la implementación.</p>
+            <div class="chat-area" id="developerChatArea">
+                <!-- Mensajes del chat de desarrolladores se añadirán aquí -->
+            </div>
+            <textarea id="developerChatInput" rows="2" placeholder="Haz tu pregunta técnica aquí..." style="width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px;"></textarea>
+            <button onclick="sendDeveloperMessage()">Enviar Pregunta</button>
+            <button onclick="summarizeDeveloperChat()" style="margin-left: 10px;">Generar Resumen para Jira</button>
+            <button onclick="generateCodeAgentBrief()" style="margin-left: 10px;">Generar Brief para Agente de Código</button>
+
+            <h3 style="margin-top: 20px;">Resumen para Jira</h3>
+            <div class="response-area" id="jiraSummaryOutput" style="margin-top: 10px;">
+                <!-- Resumen para Jira se mostrará aquí -->
+            </div>
+            <button onclick="copyToClipboard('jiraSummaryOutput')" style="margin-top: 10px;">Copiar Resumen Jira</button>
+
+            <h3 style="margin-top: 20px;">Brief para Agente de Código</h3>
+            <div class="response-area" id="codeAgentBriefOutput" style="margin-top: 10px;">
+                <!-- Brief para el agente de código se mostrará aquí -->
+            </div>
+            <button onclick="copyToClipboard('codeAgentBriefOutput')" style="margin-top: 10px;">Copiar Brief</button>
+        </div>
+
     </div>
 
+    <!-- Right Sidebar for Technical Plan -->
+    <div id="rightSidebar" class="sidebar hidden" style="grid-column: 3;">
+        <h3>Plan Técnico</h3>
+        <div id="technicalPlanLinesContainer"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script>
         const functionalityInput = document.getElementById('functionalityInput');
         const chatArea = document.getElementById('chatArea');
@@ -95,39 +178,49 @@
         const sendButton = document.getElementById('sendButton');
         const prdOutput = document.getElementById('prdOutput');
         const userStoriesOutput = document.getElementById('userStoriesOutput');
+        const technicalPlanOutput = document.getElementById('technicalPlanOutput');
         const projectPathInput = document.getElementById('projectPathInput');
         const templateTypeInput = document.getElementById('templateTypeInput');
         const forceIndexCheckbox = document.getElementById('forceIndex');
         const existingPrdSection = document.getElementById('existingPrdSection');
         const existingPrdContentInput = document.getElementById('existingPrdContent');
-        const functionalityDescriptionSection = document.getElementById('functionalityDescriptionSection'); // <--- AÑADIR ESTA LÍNEA
-        const llmProviderInput = document.getElementById('llmProviderInput'); // Add this line
+        const functionalityDescriptionSection = document.getElementById('functionalityDescriptionSection');
+        const llmProviderInput = document.getElementById('llmProviderInput');
 
-        const generateNowButton = document.getElementById('generateNowButton'); // Add this line
-        const chatInstructions = document.getElementById('chatInstructions'); // Add this line
+        const generateNowButton = document.getElementById('generateNowButton');
+        const chatInstructions = document.getElementById('chatInstructions');
+
+        // Nuevos elementos para el chat de desarrolladores
+        const developerChatSection = document.getElementById('developerChatSection');
+        const developerChatArea = document.getElementById('developerChatArea');
+        const developerChatInput = document.getElementById('developerChatInput');
+        const jiraSummaryOutput = document.getElementById('jiraSummaryOutput');
+        const codeAgentBriefOutput = document.getElementById('codeAgentBriefOutput');
+
+        // Nuevos elementos para los selectores de documentos
+        const leftSidebar = document.getElementById('leftSidebar');
+        const rightSidebar = document.getElementById('rightSidebar');
+        const prdLinesContainer = document.getElementById('prdLinesContainer');
+        const userStoriesLinesContainer = document.getElementById('userStoriesLinesContainer');
+        const technicalPlanLinesContainer = document.getElementById('technicalPlanLinesContainer');
 
 
-        let conversationHistory = [];
-        let currentStep = 0; // Para simular los pasos de la conversación
-        let indexedProjectPath = ''; // Para almacenar la ruta del proyecto indexado
+        let indexedProjectPath = '';
+        let currentSessionId = 'default_user_session';
 
-        // <--- AÑADIR ESTA FUNCIÓN PARA MANEJAR EL CAMBIO DE TEMPLATE -->
         function handleTemplateChange() {
             const selectedTemplate = templateTypeInput.value;
             if (selectedTemplate === 'prd_feature_existing') {
                 existingPrdSection.classList.remove('hidden');
-                functionalityDescriptionSection.classList.add('hidden'); // <--- AÑADIR ESTA LÍNEA
-                functionalityInput.value = ''; // Limpiar el contenido
+                functionalityDescriptionSection.classList.add('hidden');
+                functionalityInput.value = '';
             } else {
                 existingPrdSection.classList.add('hidden');
-                existingPrdContentInput.value = ''; // Limpiar el contenido si se oculta
-                functionalityDescriptionSection.classList.remove('hidden'); // <--- AÑADIR ESTA LÍNEA
+                existingPrdContentInput.value = '';
+                functionalityDescriptionSection.classList.remove('hidden');
             }
         }
-        // <--- Asegurarse de que la función se ejecute al cargar la página por primera vez
         document.addEventListener('DOMContentLoaded', handleTemplateChange);
-        // <--- FIN DE LA FUNCIÓN handleTemplateChange -->
-
 
         async function startConversation() {
             const projectPath = projectPathInput.value;
@@ -137,13 +230,12 @@
                 alert('Por favor, ingresa la ruta del directorio de tu proyecto.');
                 return;
             }
-            indexedProjectPath = projectPath; // Almacenar la ruta para futuras llamadas
+            indexedProjectPath = projectPath;
 
             const templateType = templateTypeInput.value;
             const initialDescription = functionalityInput.value;
             const existingPrdContent = existingPrdContentInput.value;
 
-            // Validaciones adicionales para "PRD Feature"
             if (templateType === 'prd_feature_existing' && !existingPrdContent) {
                 alert('Para "PRD Feature", por favor, pega el contenido del PRD existente.');
                 return;
@@ -154,17 +246,14 @@
                 return;
             }
 
-
-            // Deshabilitar inputs y botones mientras se procesa
             functionalityInput.disabled = true;
-            document.querySelector('button').disabled = true;
+            document.querySelector('button').disabled = true; // Deshabilita el primer botón
             projectPathInput.disabled = true;
             templateTypeInput.disabled = true;
             forceIndexCheckbox.disabled = true;
             existingPrdContentInput.disabled = true;
 
 
-            // Simular indexación (ahora será una llamada al backend real)
             appendMessage('IA', 'Iniciando indexación del proyecto...');
             
             try {
@@ -183,9 +272,9 @@
                     appendMessage('IA', result.message);
                 } else {
                     appendMessage('IA', `Error en la indexación: ${result.detail}`);
-                    // Optionally re-enable inputs for correction
                     functionalityInput.disabled = false;
-                    document.querySelector('button').disabled = false;
+                    const buttons = document.querySelectorAll('button');
+                    buttons.forEach(button => button.disabled = false);
                     projectPathInput.disabled = false;
                     templateTypeInput.disabled = false;
                     forceIndexCheckbox.disabled = false;
@@ -195,7 +284,8 @@
             } catch (error) {
                 appendMessage('IA', `Error al conectar con el servidor para la indexación: ${error.message}`);
                 functionalityInput.disabled = false;
-                document.querySelector('button').disabled = false;
+                const buttons = document.querySelectorAll('button');
+                buttons.forEach(button => button.disabled = false);
                 projectPathInput.disabled = false;
                 templateTypeInput.disabled = false;
                 forceIndexCheckbox.disabled = false;
@@ -203,7 +293,6 @@
                 return;
             }
 
-            // --- Nueva sección: Iniciar conversación con la IA a través del backend ---
             appendMessage('IA', 'Iniciando conversación con la IA...');
             try {
                 const response = await fetch('/start_conversation', {
@@ -215,23 +304,22 @@
                         initial_description: initialDescription,
                         template_type: templateType,
                         existing_prd_content: existingPrdContent,
-                        llm_provider: llmProviderInput.value // Pass the selected LLM provider
+                        llm_provider: llmProviderInput.value
                     })
                 });
                 const result = await response.json();
 
                 if (response.ok) {
-                    // AI's first question is in result.message
                     appendMessage('IA', result.message);
                     chatInput.style.display = 'block';
                     sendButton.style.display = 'block';
-                    generateNowButton.style.display = 'block'; // Show generate button
-                    chatInstructions.style.display = 'block'; // Show instructions
+                    generateNowButton.style.display = 'block';
+                    chatInstructions.style.display = 'block';
                 } else {
                     appendMessage('IA', `Error al iniciar conversación: ${result.message}`);
-                    // Re-enable inputs for correction if starting conversation fails
                     functionalityInput.disabled = false;
-                    document.querySelector('button').disabled = false;
+                    const buttons = document.querySelectorAll('button');
+                    buttons.forEach(button => button.disabled = false);
                     projectPathInput.disabled = false;
                     templateTypeInput.disabled = false;
                     forceIndexCheckbox.disabled = false;
@@ -240,68 +328,31 @@
             } catch (error) {
                 appendMessage('IA', `Error de conexión al iniciar conversación: ${error.message}`);
                 functionalityInput.disabled = false;
-                document.querySelector('button').disabled = false;
+                const buttons = document.querySelectorAll('button');
+                buttons.forEach(button => button.disabled = false);
                 projectPathInput.disabled = false;
                 templateTypeInput.disabled = false;
                 forceIndexCheckbox.disabled = false;
                 existingPrdContentInput.disabled = false;
             }
-            // --- Fin de la nueva sección ---
-
-            // Eliminar estas líneas ya que la conversación se inicializa en el backend
-            // conversationHistory = [{ 
-            //     role: 'pm', 
-            //     content: initialDescription,
-            //     template_type: templateType,
-            //     existing_prd_content: existingPrdContent
-            // }];
-            // appendMessage('PM', initialDescription);
-
-            // functionalityInput.disabled = true;
-            // document.querySelector('button').disabled = true; // Deshabilita el botón "Iniciar Conversación"
-            // projectPathInput.disabled = true;
-            // templateTypeInput.disabled = true;
-            // forceIndexCheckbox.disabled = true;
-            // existingPrdContentInput.disabled = true;
-
-
-            // chatInput.style.display = 'block';
-            // sendButton.style.display = 'block';
-
-            // Modificar esta llamada para enviar contexto al chat dinámico
-            // await getNextQuestionFromAI(); // Ya no se llama directamente aquí, la primera pregunta viene de /start_conversation
         }
 
-        function appendMessage(sender, text) {
+        function appendMessage(sender, text, targetArea = chatArea) {
             const msgElement = document.createElement('p');
             msgElement.className = `message-${sender.toLowerCase()}`;
-            msgElement.textContent = `${sender}: ${text}`;
-            chatArea.appendChild(msgElement);
-            chatArea.scrollTop = chatArea.scrollHeight; // Scroll al final
+            // Use marked.js to convert markdown to HTML, especially for code blocks
+            msgElement.innerHTML = `${sender}: ${marked.parse(text)}`;
+            targetArea.appendChild(msgElement);
+            targetArea.scrollTop = targetArea.scrollHeight;
         }
-
-        // <--- MODIFICAR ESTA FUNCIÓN PARA HACER LLAMADA REAL AL BACKEND PARA PREGUNTAS -->
-        async function getNextQuestionFromAI() {
-            // Esta función ya no se usará para la primera pregunta, sino para subsiguientes preguntas de la IA
-            // después de que el usuario envíe un mensaje.
-            // Su lógica se moverá o adaptará dentro de sendMessage().
-            console.warn("getNextQuestionFromAI debería ser llamada solo internamente por sendMessage ahora.");
-        }
-        // <--- FIN DE LA FUNCIÓN MODIFICADA -->
-
 
         async function sendMessage() {
             const userResponse = chatInput.value;
             if (!userResponse) return;
 
-            // La conversación se maneja en el backend, solo enviamos la respuesta del usuario.
-            // No necesitamos appendMessage('PM', userResponse) aquí, ya que el backend maneja el historial.
-            // Sin embargo, para una mejor experiencia de usuario, podríamos mostrarlo inmediatamente.
             appendMessage('PM', userResponse);
+            chatInput.value = '';
 
-            chatInput.value = ''; // Limpiar el input inmediatamente después de enviar
-
-            // Enviar la respuesta del usuario al backend y obtener la siguiente pregunta de la IA
             try {
                 const response = await fetch('/send_message', {
                     method: 'POST',
@@ -309,9 +360,9 @@
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        session_id: 'default_user_session', // Keep session fixed for now
-                        user_message: userResponse, // Send user response
-                        llm_provider: llmProviderInput.value // Pass the selected LLM provider
+                        session_id: currentSessionId,
+                        user_message: userResponse,
+                        llm_provider: llmProviderInput.value
                     }),
                 });
                 const result = await response.json();
@@ -319,10 +370,6 @@
                 if (result.status === 'success') {
                     const aiQuestion = result.ai_response;
                     appendMessage('IA', aiQuestion);
-                    // The AI will indicate when it's ready to generate documents. User can click button.
-                    if (aiQuestion.includes('generar los documentos')) {
-                        // The button will be used by the user to finalize the process
-                    }
                 } else {
                     appendMessage('IA', `Error al enviar mensaje: ${result.message}`);
                 }
@@ -330,7 +377,6 @@
                 appendMessage('IA', `Error de conexión al enviar mensaje: ${error.message}`);
             }
         }
-        // <--- FIN DE LA FUNCIÓN MODIFICADA -->
 
         async function generateDocuments() {
             const response = await fetch('/generate_documents', {
@@ -339,10 +385,10 @@
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    session_id: 'default_user_session',
+                    session_id: currentSessionId,
                     template_type: templateTypeInput.value,
                     existing_prd_content: existingPrdContentInput.value,
-                    llm_provider: llmProviderInput.value // <--- AÑADIR ESTA LÍNEA
+                    llm_provider: llmProviderInput.value
                 }),
             });
             const result = await response.json();
@@ -350,12 +396,108 @@
             if (result.status === 'success') {
                 prdOutput.textContent = result.prd;
                 userStoriesOutput.textContent = result.user_stories;
-                technicalPlanOutput.textContent = result.technical_plan; // <--- AÑADIR ESTA LÍNEA
-                appendMessage('IA', '¡Documentos generados! Puedes copiarlos o descargarlos.');
+                technicalPlanOutput.textContent = result.technical_plan;
+                appendMessage('IA', '¡Documentos generados! Ahora puedes usar el chat de desarrolladores para más ayuda.', chatArea);
+                
+                // Show developer chat section and sidebars
+                developerChatSection.classList.remove('hidden');
+                leftSidebar.classList.remove('hidden');
+                rightSidebar.classList.remove('hidden');
+
+                // Fetch and display structured documents for selection
+                await fetchAndDisplayStructuredDocuments();
+
             } else {
                 prdOutput.textContent = `Error: ${result.message}`;
                 userStoriesOutput.textContent = `Error: ${result.message}`;
-                appendMessage('IA', `Error al generar documentos: ${result.message}`);
+                technicalPlanOutput.textContent = `Error: ${result.message}`;
+                appendMessage('IA', `Error al generar documentos: ${result.message}`, chatArea);
+            }
+        }
+
+        // Funciones para el chat de desarrolladores
+        async function sendDeveloperMessage() {
+            const developerResponse = developerChatInput.value;
+            if (!developerResponse) return;
+
+            appendMessage('Desarrollador', developerResponse, developerChatArea);
+            developerChatInput.value = '';
+
+            try {
+                const response = await fetch('/developer_chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        session_id: currentSessionId,
+                        developer_message: developerResponse,
+                        llm_provider: llmProviderInput.value
+                    }),
+                });
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    appendMessage('IA', result.ai_response, developerChatArea);
+                } else {
+                    appendMessage('IA', `Error en chat de desarrollador: ${result.message}`, developerChatArea);
+                }
+            } catch (error) {
+                appendMessage('IA', `Error de conexión en chat de desarrollador: ${error.message}`, developerChatArea);
+            }
+        }
+
+        async function summarizeDeveloperChat() {
+            try {
+                const response = await fetch('/summarize_developer_chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        session_id: currentSessionId,
+                        llm_provider: llmProviderInput.value
+                    }),
+                });
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    jiraSummaryOutput.textContent = result.summary;
+                    appendMessage('IA', 'Resumen para Jira generado.', developerChatArea);
+                } else {
+                    jiraSummaryOutput.textContent = `Error: ${result.message}`;
+                    appendMessage('IA', `Error al generar resumen para Jira: ${result.message}`, developerChatArea);
+                }
+            } catch (error) {
+                jiraSummaryOutput.textContent = `Error de conexión al generar resumen para Jira: ${error.message}`;
+                appendMessage('IA', `Error de conexión al generar resumen para Jira: ${error.message}`, developerChatArea);
+            }
+        }
+
+        async function generateCodeAgentBrief() {
+            try {
+                const response = await fetch('/generate_code_agent_brief', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        session_id: currentSessionId,
+                        llm_provider: llmProviderInput.value
+                    }),
+                });
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    codeAgentBriefOutput.textContent = result.brief;
+                    appendMessage('IA', 'Brief para Agente de Código generado.', developerChatArea);
+                } else {
+                    codeAgentBriefOutput.textContent = `Error: ${result.message}`;
+                    appendMessage('IA', `Error al generar brief para Agente de Código: ${result.message}`, developerChatArea);
+                }
+            } catch (error) {
+                codeAgentBriefOutput.textContent = `Error de conexión al generar brief para Agente de Código: ${error.message}`;
+                appendMessage('IA', `Error de conexión al generar brief para Agente de Código: ${error.message}`, developerChatArea);
             }
         }
 
@@ -368,6 +510,44 @@
                 console.error('Error al copiar: ', err);
             });
         }
+
+        // New functions for structured document selection
+        async function fetchAndDisplayStructuredDocuments() {
+            try {
+                const response = await fetch(`/get_structured_documents?session_id=${currentSessionId}`);
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    renderStructuredContent(result.prd_lines, prdLinesContainer);
+                    renderStructuredContent(result.user_stories_lines, userStoriesLinesContainer);
+                    renderStructuredContent(result.technical_plan_lines, technicalPlanLinesContainer);
+                } else {
+                    console.error('Error fetching structured documents:', result.message);
+                }
+            } catch (error) {
+                console.error('Connection error fetching structured documents:', error);
+            }
+        }
+
+        function renderStructuredContent(lines, containerElement) {
+            containerElement.innerHTML = ''; // Clear previous content
+            lines.forEach(line => {
+                const item = document.createElement('div');
+                item.className = 'sidebar-item';
+                // Use marked.js to convert markdown to HTML for sidebar content
+                item.innerHTML = marked.parse(line);
+                item.onclick = () => insertSelectedText(line);
+                containerElement.appendChild(item);
+            });
+        }
+
+        function insertSelectedText(text) {
+            const chatInput = document.getElementById('developerChatInput');
+            // Append the selected text, adding a newline for better readability
+            chatInput.value += (chatInput.value ? '\n' : '') + text;
+            chatInput.focus(); // Focus the input for the user
+        }
+
     </script>
 </body>
 </html> 

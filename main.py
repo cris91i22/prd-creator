@@ -7,7 +7,7 @@ from typing import List, Dict, Optional
 import os
 
 # Importar las funciones de nuestro app.py
-from app import index_project, generate_prd_and_user_stories, get_next_chat_question
+from app import index_project, generate_prd_and_user_stories, get_next_chat_question, get_developer_chat_response, summarize_developer_chat, generate_code_agent_brief
 
 app = FastAPI()
 
@@ -20,6 +20,8 @@ templates = Jinja2Templates(directory="templates")
 # Almacenamiento temporal para el índice y el historial de conversación (en una app real se usaría una DB)
 project_index = None # Este será el índice global que se cargará/creará
 conversation_data: Dict[str, List[Dict[str, str]]] = {}
+developer_chat_history_data: Dict[str, List[Dict[str, str]]] = {} # Nuevo: Historial del chat de desarrolladores
+generated_documents_cache: Dict[str, Dict[str, str]] = {} # Nuevo: Cache para PRD, HU, Plan Técnico
 
 # Variable global para almacenar la ruta del proyecto indexado
 indexed_project_path: str = ""
@@ -154,7 +156,7 @@ class GenerateDocumentsInput(BaseModel):
 
 @app.post("/generate_documents")
 async def generate_documents_endpoint(data: GenerateDocumentsInput):
-    global project_index, conversation_data
+    global project_index, conversation_data, generated_documents_cache # Add generated_documents_cache
     session_id = data.session_id
     template_type = data.template_type
     existing_prd_content = data.existing_prd_content
@@ -181,10 +183,156 @@ async def generate_documents_endpoint(data: GenerateDocumentsInput):
             existing_prd_content,
             llm_provider # Pass llm_provider
         )
+        
+        # Store generated documents in cache for developer chat
+        generated_documents_cache[session_id] = {
+            "prd": prd_content,
+            "user_stories": user_stories_content,
+            "technical_plan": technical_plan_content
+        }
+        # Initialize developer chat history for this session
+        developer_chat_history_data[session_id] = []
+
         return {"status": "success", "prd": prd_content, "user_stories": user_stories_content, "technical_plan": technical_plan_content}
     except Exception as e:
         print(f"DEBUG: Exception caught in generate_documents_endpoint: {type(e)} - {e}")
         return {"status": "error", "message": f"Error al generar documentos: {str(e)}"}
+
+class DeveloperChatMessageInput(BaseModel):
+    session_id: str
+    developer_message: str
+    llm_provider: str = "google"
+
+@app.post("/developer_chat")
+async def developer_chat_endpoint(message_data: DeveloperChatMessageInput):
+    global project_index, developer_chat_history_data, generated_documents_cache, indexed_project_path
+    session_id = message_data.session_id
+    developer_message = message_data.developer_message
+    llm_provider = message_data.llm_provider
+
+    if session_id not in developer_chat_history_data:
+        return {"status": "error", "message": "Sesión de chat de desarrollador no encontrada. Por favor, genera los documentos primero."}
+    
+    if session_id not in generated_documents_cache:
+        return {"status": "error", "message": "Documentos generados no encontrados para esta sesión. Por favor, genera los documentos primero."}
+
+    # Ensure project is indexed
+    if project_index is None and indexed_project_path:
+        try:
+            project_index = await index_project(indexed_project_path)
+        except Exception as e:
+            return {"status": "error", "message": f"Error al recargar el índice del proyecto: {str(e)}. Por favor, re-indexa el proyecto."}
+    elif project_index is None:
+        return {"status": "error", "message": "El proyecto no ha sido indexado aún."}
+
+    # Add developer message to history
+    developer_chat_history_data[session_id].append({"role": "developer", "content": developer_message})
+    current_dev_chat = developer_chat_history_data[session_id]
+    
+    # Get generated documents
+    documents = generated_documents_cache[session_id]
+    prd_content = documents.get("prd", "")
+    user_stories_content = documents.get("user_stories", "")
+    technical_plan_content = documents.get("technical_plan", "")
+
+    try:
+        ai_response = await get_developer_chat_response(
+            current_dev_chat,
+            project_index,
+            prd_content,
+            user_stories_content,
+            technical_plan_content,
+            llm_provider
+        )
+        developer_chat_history_data[session_id].append({"role": "ia", "content": ai_response})
+        return {"status": "success", "ai_response": ai_response}
+    except Exception as e:
+        print(f"DEBUG: Error in developer_chat_endpoint: {type(e)} - {e}")
+        return {"status": "error", "message": f"Error al generar respuesta del chat de desarrollador: {str(e)}"}
+
+class SummarizeDeveloperChatInput(BaseModel):
+    session_id: str
+    llm_provider: str = "google"
+
+@app.post("/summarize_developer_chat")
+async def summarize_developer_chat_endpoint(data: SummarizeDeveloperChatInput):
+    global developer_chat_history_data
+    session_id = data.session_id
+    llm_provider = data.llm_provider
+
+    developer_chat = developer_chat_history_data.get(session_id)
+    if not developer_chat:
+        return {"status": "error", "message": "No hay historial de chat de desarrollador para resumir."}
+    
+    try:
+        summary = await summarize_developer_chat(developer_chat, llm_provider)
+        return {"status": "success", "summary": summary}
+    except Exception as e:
+        print(f"DEBUG: Error in summarize_developer_chat_endpoint: {type(e)} - {e}")
+        return {"status": "error", "message": f"Error al generar resumen para Jira: {str(e)}"}
+
+class GenerateCodeAgentBriefInput(BaseModel):
+    session_id: str
+    llm_provider: str = "google"
+
+@app.post("/generate_code_agent_brief")
+async def generate_code_agent_brief_endpoint(data: GenerateCodeAgentBriefInput):
+    global project_index, developer_chat_history_data, generated_documents_cache, indexed_project_path
+    session_id = data.session_id
+    llm_provider = data.llm_provider
+
+    developer_chat = developer_chat_history_data.get(session_id)
+    if not developer_chat:
+        return {"status": "error", "message": "No hay historial de chat de desarrollador para generar el brief."}
+    
+    documents = generated_documents_cache.get(session_id)
+    if not documents:
+        return {"status": "error", "message": "Documentos generados no encontrados para esta sesión."}
+
+    # Ensure project is indexed
+    if project_index is None and indexed_project_path:
+        try:
+            project_index = await index_project(indexed_project_path)
+        except Exception as e:
+            return {"status": "error", "message": f"Error al recargar el índice del proyecto: {str(e)}. Por favor, re-indexa el proyecto."}
+    elif project_index is None:
+        return {"status": "error", "message": "El proyecto no ha sido indexado aún."}
+
+
+    try:
+        brief = await generate_code_agent_brief(
+            developer_chat,
+            project_index,
+            documents.get("prd", ""),
+            documents.get("user_stories", ""),
+            documents.get("technical_plan", ""),
+            llm_provider
+        )
+        return {"status": "success", "brief": brief}
+    except Exception as e:
+        print(f"DEBUG: Error in generate_code_agent_brief_endpoint: {type(e)} - {e}")
+        return {"status": "error", "message": f"Error al generar brief para el agente de código: {str(e)}"}
+
+@app.get("/get_structured_documents")
+async def get_structured_documents_endpoint(session_id: str):
+    global generated_documents_cache
+    documents = generated_documents_cache.get(session_id)
+
+    if not documents:
+        return JSONResponse(content={"status": "error", "message": "Documentos no encontrados para la sesión."},
+                            status_code=404)
+
+    # Simple splitting by lines for now. Can be enhanced later to parse markdown headings.
+    structured_prd = [line for line in documents.get("prd", "").splitlines() if line.strip()]
+    structured_user_stories = [line for line in documents.get("user_stories", "").splitlines() if line.strip()]
+    structured_technical_plan = [line for line in documents.get("technical_plan", "").splitlines() if line.strip()]
+
+    return {
+        "status": "success",
+        "prd_lines": structured_prd,
+        "user_stories_lines": structured_user_stories,
+        "technical_plan_lines": structured_technical_plan
+    }
 
 # Para ejecutar esta aplicación, guarda este archivo como main.py y ejecuta:
 # uvicorn main:app --reload 

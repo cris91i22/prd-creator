@@ -7,6 +7,7 @@ Esta aplicación web es una herramienta diseñada para ayudar a los Product Mana
 *   **Indexación de Proyecto Local**: Indexa directorios de proyectos (código, documentación, etc.) para que la IA tenga contexto relevante al generar PRDs e Historias de Usuario.
 *   **Interacción Conversacional**: Un chat interactivo donde el asistente de IA hace preguntas aclaratorias para recopilar los detalles necesarios.
 *   **Generación de Documentos**: Genera PRDs y Historias de Usuario basados en el contexto conversacional y las plantillas seleccionadas.
+*   **Generación de Plan Técnico**: Genera un plan de acción técnico detallado, incluyendo arquitectura, componentes afectados, convenciones de nombres, puntos de integración y enfoques de implementación, para facilitar el refinamiento e implementación por agentes de desarrollo.
 *   **Soporte Multi-LLM**: Permite alternar entre modelos de Google Gemini y modelos locales a través de Ollama (ej. Gemma 3n).
 *   **Gestión de Plantillas**: Soporte para diferentes tipos de documentos (PRD, PRD Feature, Feature, Bug, Work) con plantillas asociadas.
 *   **Funcionalidad de Drag & Drop (Parcial)**: Soporte para adjuntar archivos a través de arrastrar y soltar en el chat (con validaciones de tipo y tamaño).
@@ -90,7 +91,7 @@ Abre tu navegador web y visita `http://127.0.0.1:8000` (o la dirección que mues
 4.  **Proveedor de LLM**: Elige entre "Google (Gemini)" o "Ollama (Llama3)" (que usará gemma3n:e2b).
 5.  **Iniciar Conversación**: Haz clic en este botón para comenzar la interacción con la IA.
 6.  **Chat con la IA**: Responde a las preguntas de la IA para proporcionar el contexto necesario. Puedes hacer clic en "Generar Documentos Ahora" en cualquier momento.
-7.  **Generar Documentos**: Una vez que sientas que has proporcionado suficiente información, haz clic en "Generar Documentos Ahora" para obtener el PRD y las Historias de Usuario.
+7.  **Generar Documentos**: Una vez que sientas que has proporcionado suficiente información, haz clic en "Generar Documentos Ahora" para obtener el PRD, las Historias de Usuario y el Plan Técnico.
 8.  **Copiar/Descargar**: Copia el contenido generado al portapapeles o descárgalo.
 
 ---

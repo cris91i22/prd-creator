@@ -6,3 +6,5 @@ chromadb
 gitingest
 google-generativeai 
 llama-index-llms-ollama 
+fastapi
+uvicorn 

@@ -174,14 +174,14 @@ async def generate_documents_endpoint(data: GenerateDocumentsInput):
 
     # Generar PRD e Historias de Usuario (usando la función de app.py)
     try:
-        prd_content, user_stories_content = await generate_prd_and_user_stories(
+        prd_content, user_stories_content, technical_plan_content = await generate_prd_and_user_stories(
             current_conversation, 
             project_index, 
             template_type,
             existing_prd_content,
             llm_provider # Pass llm_provider
         )
-        return {"status": "success", "prd": prd_content, "user_stories": user_stories_content}
+        return {"status": "success", "prd": prd_content, "user_stories": user_stories_content, "technical_plan": technical_plan_content}
     except Exception as e:
         print(f"DEBUG: Exception caught in generate_documents_endpoint: {type(e)} - {e}")
         return {"status": "error", "message": f"Error al generar documentos: {str(e)}"}

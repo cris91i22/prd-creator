@@ -80,6 +80,12 @@
             <!-- Historias de Usuario se mostrarán aquí -->
         </div>
         <button onclick="copyToClipboard('userStoriesOutput')" style="margin-top: 10px;">Copiar Historias de Usuario</button>
+
+        <h2>Plan Técnico Generado</h2>
+        <div class="response-area" id="technicalPlanOutput" style="margin-top: 20px;">
+            <!-- Plan Técnico se mostrará aquí -->
+        </div>
+        <button onclick="copyToClipboard('technicalPlanOutput')" style="margin-top: 10px;">Copiar Plan Técnico</button>
     </div>
 
     <script>
@@ -344,6 +350,7 @@
             if (result.status === 'success') {
                 prdOutput.textContent = result.prd;
                 userStoriesOutput.textContent = result.user_stories;
+                technicalPlanOutput.textContent = result.technical_plan; // <--- AÑADIR ESTA LÍNEA
                 appendMessage('IA', '¡Documentos generados! Puedes copiarlos o descargarlos.');
             } else {
                 prdOutput.textContent = `Error: ${result.message}`;

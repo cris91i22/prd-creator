@@ -3,12 +3,12 @@
 
 import os
 from llama_index.core import VectorStoreIndex, StorageContext
-from llama_index.core.node_parser import SentenceSplitter, SemanticSplitterNodeParser
+from llama_index.core.node_parser import SentenceSplitter
 from llama_index.embeddings.google_genai import GoogleGenAIEmbedding
 from llama_index.vector_stores.chroma import ChromaVectorStore
 from llama_index.core.schema import Document
 import chromadb
-from gitingest import ingest, ingest_async
+from gitingest import ingest_async
 from typing import List, Dict, Optional
 from dotenv import load_dotenv
 load_dotenv()
@@ -196,14 +196,6 @@ async def get_next_chat_question(conversation_history: List[Dict[str, str]], pro
         return f"Error al generar la pregunta con el LLM: {str(e)}. Por favor, verifica tu clave de API y la disponibilidad del modelo."
 
 
-def chat_with_pm(index):
-    """
-    Simula la interacción de chat con el PM para recolectar contexto.
-    En una aplicación real, esto sería una interfaz web.
-    """
-    # Esta función ya no se usará directamente desde main.py, su lógica se trasladará a los endpoints.
-    pass
-
 # --- Fase 3: Generación de PRDs e Historias de Usuario ---
 
 async def generate_prd_and_user_stories(conversation_history: List[Dict[str, str]], project_index, template_type: str, existing_prd_content: Optional[str] = None, llm_provider: str = "google"):
@@ -335,31 +327,110 @@ async def generate_prd_and_user_stories(conversation_history: List[Dict[str, str
         print(f"DEBUG: Error al generar Historias de Usuario - Tipo: {type(e).__name__}, Mensaje: {e}")
         user_stories_content = f"Error al generar las Historias de Usuario con el LLM: {str(e)}. Por favor, verifica tu clave de API y la disponibilidad del modelo."
 
-    print("PRD y Historias de Usuario generados (usando LLM)...")
-    return prd_content, user_stories_content
+    # Generar el Plan Técnico
+    technical_plan_content = await generate_technical_plan(
+        conversation_history,
+        project_index,
+        prd_content, # Pass the generated PRD to the technical plan function
+        llm_provider
+    )
 
-# --- Fase 4: Gestión de Salidas (En la Interfaz Web) ---
-# Esta parte se manejaría en el frontend de la aplicación web.
-# Las funciones aquí solo simulan la entrega del contenido.
+    print("PRD, Historias de Usuario y Plan Técnico generados (usando LLM)...")
+    return prd_content, user_stories_content, technical_plan_content
 
-def display_and_allow_download(prd, user_stories):
-    # Esta función ya no se usará directamente, su lógica se maneja en el frontend.
-    pass
 
-# --- Flujo Principal de la Aplicación ---
+async def generate_technical_plan(conversation_history: List[Dict[str, str]], project_index, prd_content_for_tp: str, llm_provider: str = "google"):
+    """
+    Genera un plan de acción técnico basado en el historial de conversación, el contexto del proyecto y el PRD generado.
+    Este plan incluirá detalles sobre arquitectura, componentes/ficheros afectados,
+    convenciones de nombres, puntos de integración y enfoques de implementación.
+    """
+    print("\n--- Generando Plan Técnico ---")
+
+    from llama_index.llms.google_genai import GoogleGenAI
+    from llama_index.core.prompts import PromptTemplate
+    from llama_index.llms.ollama import Ollama
+
+    llm = None
+    if llm_provider == "google":
+        llm = GoogleGenAI(model="models/gemini-2.5-flash", max_output_tokens=8000)
+    elif llm_provider == "ollama":
+        llm = Ollama(model="gemma3n:e2b", request_timeout=360.0)
+    else:
+        raise ValueError("Invalid LLM provider specified.")
+
+    # Combinar todo el contexto de la conversación
+    full_context = ""
+    for msg in conversation_history:
+        if msg['role'] == 'pm':
+            full_context += f"{msg['role'].upper()}: {msg['content']}\n"
+
+    # Plantilla para el plan técnico
+    technical_plan_template = PromptTemplate(
+        """Eres un asistente de IA que ayuda a los Product Managers a recopilar información para PRDs e Historias de Usuario, y también a generar planes técnicos de alto nivel.
+        Basado en el siguiente contexto de conversación con el PM y la información del proyecto indexada, genera un plan de acción técnico EXTREMADAMENTE CONCISO y directo.
+        El plan debe cubrir los siguientes puntos clave con la menor cantidad de palabras posible, utilizando un formato claro y listado.
+
+        El plan debe incluir:
+        - Cómo esta funcionalidad encaja en la arquitectura existente.
+        - Qué archivos o componentes existentes podrían verse afectados.
+        - Convenciones de nombres a seguir basadas en la base de código actual.
+        - Puntos de integración con funcionalidades existentes.
+        - Enfoque de implementación sugerido basado en patrones actuales.
+        - **Consideraciones Adicionales**: Menciona brevemente (1-2 frases por punto):
+            - Manejo de errores y casos límite relevantes para la funcionalidad.
+            - Implicaciones de rendimiento y experiencia de usuario (UX).
+            - Aspectos de seguridad.
+            - Estrategia de pruebas (ej. unitarias, integración, E2E).
+
+        IMPORTANTE: Genera ÚNICAMENTE el contenido del plan técnico. No incluyas ningún saludo, introducción conversacional, o resumen de la conversación. Céntrate exclusivamente en el plan final.
+
+        PRD Generado:
+        {prd_content_for_tp}
+
+        Contexto de Conversación con el PM:
+        {conversation_context}
+
+        Información Relevante del Proyecto (si aplica):
+        {project_info}
+        """
+    )
+
+    relevant_project_info = "No se recuperó información específica del proyecto para la generación del plan técnico."
+    if project_index:
+        try:
+            query_engine = project_index.as_query_engine()
+            # Usar una consulta más general para el plan técnico
+            simulated_query = f"Basado en la conversación sobre la funcionalidad de {conversation_history[0].get('content', 'una nueva característica')}, ¿cuál es la información técnica más concisa y relevante del proyecto para la planificación de la implementación (arquitectura, componentes, patrones)?"
+            response = query_engine.query(simulated_query)
+            if response and response.response:
+                relevant_project_info = response.response
+            else:
+                relevant_project_info = "No se encontró información relevante del proyecto para esta consulta específica."
+        except Exception as e:
+            relevant_project_info = f"Error al recuperar información del proyecto para el plan técnico: {str(e)}"
+
+    # Generar el plan técnico usando el LLM
+    technical_plan_content = ""
+    try:
+        full_prompt_text_tp = technical_plan_template.format(
+            conversation_context=full_context,
+            project_info=relevant_project_info,
+            prd_content_for_tp=prd_content_for_tp
+        )
+        llm_response_tp = await llm.acomplete(full_prompt_text_tp)
+        technical_plan_content = llm_response_tp.text.strip()
+
+        if not technical_plan_content.startswith("# Plan Técnico"):
+            technical_plan_content = "# Plan Técnico\n" + technical_plan_content
+
+    except Exception as e:
+        print(f"DEBUG: Error al generar Plan Técnico - Tipo: {type(e).__name__}, Mensaje: {e}")
+        technical_plan_content = f"Error al generar el Plan Técnico con el LLM: {str(e)}. Por favor, verifica tu clave de API y la disponibilidad del modelo."
+
+    print("Plan Técnico generado (usando LLM)...")
+    return technical_plan_content
+
+
 if __name__ == "__main__":
-    pass
-    # project_to_index = "./my_local_project" # Directorio de ejemplo
-    # os.makedirs(project_to_index, exist_ok=True) # Asegurarse de que el directorio exista para el dummy file
-
-    # # 1. Indexar el proyecto
-    # project_index = index_project(project_to_index)
-
-    # # 2. Interactuar con el PM para obtener la descripción
-    # conversation = chat_with_pm(project_index)
-
-    # # 3. Generar PRD e Historias de Usuario
-    # prd, user_stories = generate_prd_and_user_stories(conversation, project_index)
-
-    # # 4. Mostrar y permitir descarga
-    # display_and_allow_download(prd, user_stories) 
+    pass 

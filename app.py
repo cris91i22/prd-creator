@@ -96,6 +96,27 @@ async def index_project(project_path: str, force_index: bool = False):
     print("Proyecto indexado y embeddings almacenados en ChromaDB.")
     return index
 
+def _is_initial_conversation_state(conversation_history: List[Dict[str, str]]) -> bool:
+    """
+    Checks if the conversation is at its initial state.
+    This is true if there's no history or only a single message from the PM.
+    """
+    return not conversation_history or \
+           (len(conversation_history) == 1 and conversation_history[0].get("role") == "pm")
+
+from llama_index.llms.google_genai import GoogleGenAI
+from llama_index.core.prompts import PromptTemplate
+from llama_index.llms.ollama import Ollama # Added for Ollama
+
+def _get_llm(llm_provider: str):
+    if llm_provider == "google":
+        return GoogleGenAI(model="models/gemini-2.5-flash", max_output_tokens=8000)
+    elif llm_provider == "ollama":
+        return Ollama(model="gemma3n:e2b", request_timeout=360.0)
+    else:
+        raise ValueError("Invalid LLM provider specified.")
+
+
 # --- Fase 2: Descripción de Funcionalidad e Interacción Conversacional ---
 
 async def get_next_chat_question(conversation_history: List[Dict[str, str]], project_index, template_type: str, existing_prd_content: Optional[str] = None, llm_provider: str = "google"):
@@ -103,32 +124,12 @@ async def get_next_chat_question(conversation_history: List[Dict[str, str]], pro
     Genera la siguiente pregunta para el PM basada en el historial de conversación
     y el contexto del proyecto, utilizando un LLM.
     """
-    from llama_index.llms.google_genai import GoogleGenAI
-    from llama_index.core.prompts import PromptTemplate
-    from llama_index.llms.ollama import Ollama # Added for Ollama
+    llm = _get_llm(llm_provider)
 
-    llm = None
-    if llm_provider == "google":
-        llm = GoogleGenAI(model="models/gemini-2.5-flash", max_output_tokens=8000)
-    elif llm_provider == "ollama":
-        # Default to llama3, user can change this
-        llm = Ollama(model="gemma3n:e2b", request_timeout=360.0) # Changed from llama3 to gemma3n:e2b
-    else:
-        raise ValueError("Invalid LLM provider specified.")
+    base_prompt_content = _load_template_content("templates/prompts/base_chat_prompt.txt")
+    base_prompt = PromptTemplate(base_prompt_content)
 
-
-    base_prompt = """Eres un asistente de IA que ayuda a los Product Managers a recopilar información para PRDs e Historias de Usuario.
-        Basado en el siguiente historial de conversación y el contexto del proyecto indexado, formula una pregunta de clarificación para el PM.
-        La pregunta debe ser concisa, relevante y ayudar a recopilar detalles esenciales para un PRD/Historia de Usuario completo.
-
-        Historial de Conversación:
-        {conversation_context}
-
-        Información Relevante del Proyecto (si aplica):
-        {project_info}
-        """
-
-    if not conversation_history or (len(conversation_history) == 1 and conversation_history[0].get("role") == "pm"):
+    if _is_initial_conversation_state(conversation_history):
         # Si es el inicio de la conversación o solo el primer mensaje del PM
         if template_type == 'prd_feature_existing':
             base_prompt += f"""
@@ -170,19 +171,7 @@ async def get_next_chat_question(conversation_history: List[Dict[str, str]], pro
 
     prompt_template = PromptTemplate(base_prompt)
 
-    relevant_project_info = "No se recuperó información específica del proyecto para el contexto de la pregunta."
-    if project_index:
-        try:
-            query_engine = project_index.as_query_engine()
-            # Usar una consulta más general para las preguntas del chat
-            simulated_query = f"Dadas las funcionalidades mencionadas en la conversación, ¿qué información técnica relevante del proyecto podría necesitar para formular la siguiente pregunta al PM?"
-            response = query_engine.query(simulated_query)
-            if response and response.response:
-                relevant_project_info = response.response
-            else:
-                relevant_project_info = "No se encontró información relevante del proyecto para esta consulta específica."
-        except Exception as e:
-            relevant_project_info = f"Error al recuperar información del proyecto para la pregunta: {str(e)}"
+    relevant_project_info = _get_relevant_project_info(project_index, conversation_history, "formular la siguiente pregunta al PM")
 
     full_prompt_text = prompt_template.format(
         conversation_context="\n".join([f"{msg['role'].upper()}: {msg['content']}" for msg in conversation_history]),
@@ -196,6 +185,42 @@ async def get_next_chat_question(conversation_history: List[Dict[str, str]], pro
         return f"Error al generar la pregunta con el LLM: {str(e)}. Por favor, verifica tu clave de API y la disponibilidad del modelo."
 
 
+def _get_relevant_project_info(project_index, conversation_history: List[Dict[str, str]], purpose: str) -> str:
+    """
+    Retrieves relevant project information based on the project index and conversation history.
+    The 'purpose' string helps to formulate a more specific query to the project index.
+    """
+    if project_index:
+        try:
+            query_engine = project_index.as_query_engine()
+            # Usar una consulta más general para el contexto
+            simulated_query = f"Dadas las funcionalidades mencionadas en la conversación, ¿qué información técnica relevante del proyecto podría necesitar para {purpose}?"
+            response = query_engine.query(simulated_query)
+            if response and response.response:
+                return response.response
+            else:
+                return "No se encontró información relevante del proyecto para esta consulta específica."
+        except Exception as e:
+            return f"Error al recuperar información del proyecto para {purpose}: {str(e)}"
+    return "No se recuperó información específica del proyecto para el contexto de la pregunta."
+
+
+def _load_template_content(template_file: str) -> str:
+    """
+    Loads the content of a template file from the templates directory.
+    """
+    full_path = template_file
+    try:
+        with open(full_path, 'r') as f:
+            return f.read()
+    except FileNotFoundError:
+        print(f"Error: The template file '{full_path}' was not found.")
+        return ""
+    except Exception as e:
+        print(f"Error reading the template file '{full_path}': {e}")
+        return ""
+
+
 # --- Fase 3: Generación de PRDs e Historias de Usuario ---
 
 async def generate_prd_and_user_stories(conversation_history: List[Dict[str, str]], project_index, template_type: str, existing_prd_content: Optional[str] = None, llm_provider: str = "google"):
@@ -207,23 +232,14 @@ async def generate_prd_and_user_stories(conversation_history: List[Dict[str, str
     print("\n--- Generando PRD e Historias de Usuario ---")
 
     # Cargar el contenido del template seleccionado
-    template_file_path = os.path.join("templates", template_type)
+
     template_content = ""
-    try:
-        # For prd_feature_existing, we don't load from a file, but use the provided content
-        if template_type == 'prd_feature_existing':
-            template_content = existing_prd_content if existing_prd_content else ""
-            print("Usando contenido de PRD existente para generación.")
-        else:
-            with open(template_file_path, 'r') as f:
-                template_content = f.read()
-            print(f"Template '{template_type}' cargado con éxito.")
-    except FileNotFoundError:
-        print(f"Error: El template '{template_type}' no fue encontrado.")
-        template_content = ""
-    except Exception as e:
-        print(f"Error al leer el template '{template_type}': {e}")
-        template_content = ""
+    if template_type == 'prd_feature_existing':
+        template_content = existing_prd_content if existing_prd_content else ""
+        print("Usando contenido de PRD existente para generación.")
+    else:
+        template_content = _load_template_content(os.path.join("templates", template_type))
+        print(f"Template '{template_type}' cargado con éxito.")
 
     # Combinar todo el contexto para el LLM
     full_context = ""
@@ -233,66 +249,19 @@ async def generate_prd_and_user_stories(conversation_history: List[Dict[str, str
 
     # Simulación de la generación del PRD y HU
     # Utilizaremos un LLM real para la generación
-    from llama_index.llms.google_genai import GoogleGenAI
-    from llama_index.core.prompts import PromptTemplate
-    from llama_index.llms.ollama import Ollama # Added for Ollama
-
-    llm = None
-    if llm_provider == "google":
-        llm = GoogleGenAI(model="models/gemini-2.5-flash", max_output_tokens=8000)
-    elif llm_provider == "ollama":
-        llm = Ollama(model="gemma3n:e2b", request_timeout=360.0) # Changed from llama3 to gemma3n:e2b
-    else:
-        raise ValueError("Invalid LLM provider specified.")
+    llm = _get_llm(llm_provider)
 
     # Plantilla para el PRD
-    prd_template = PromptTemplate(
-        """Genera un Product Requirements Document (PRD) EXTREMADAMENTE CONCISO y detallado, basado en el siguiente contexto de conversación con el PM y la información del proyecto indexada. El PRD debe ser completo pero ABSOLUTAMENTE DIRECTO, cubriendo todos los puntos clave con la menor cantidad de palabras posible. Cada sección debe ser muy breve.
-        Utiliza el siguiente template para guiar la estructura del documento. 
-        IMPORTANTE: Genera ÚNICAMENTE el contenido del PRD. No incluyas ningún saludo, introducción conversacional, o resumen de la conversación. Céntrate exclusivamente en el documento final.
 
-        --- INICIO DEL TEMPLATE ---
-        {template_content}
-        --- FIN DEL TEMPLATE ---
+    prd_prompt_content = _load_template_content("templates/prompts/prd_prompt.txt")
+    prd_template = PromptTemplate(prd_prompt_content)
 
-        Contexto de Conversación con el PM:
-        {conversation_context}
+    user_stories_prompt_content = _load_template_content("templates/prompts/user_stories_prompt.txt")
+    user_stories_template = PromptTemplate(user_stories_prompt_content)
 
-        Información Relevante del Proyecto (si aplica):
-        {project_info}
-        """
-    )
-
-    # Plantilla para las Historias de Usuario
-    user_stories_template = PromptTemplate(
-        """Genera un conjunto MUY CONCISO Y CLARO de Historias de Usuario basadas en el siguiente contexto de conversación con el PM y el PRD generado. Las Historias de Usuario deben seguir el formato 'Como [rol], quiero [funcionalidad], para [beneficio]'. Cada historia debe ser una sola frase directa y accionable.
-        IMPORTANTE: Genera ÚNICAMENTE las Historias de Usuario. No incluyas ningún saludo, introducción conversacional, o resumen de la conversación. Céntrate exclusivamente en las historias.
-
-        PRD Generado:
-        {prd_content_for_us}
-
-        Contexto de Conversación con el PM:
-        {conversation_context}
-
-        Información Relevante del Proyecto (si aplica):
-        {project_info}
-        """
-    )
 
     # Simular la recuperación de información relevante del proyecto
-    relevant_project_info = "No se recuperó información específica del proyecto para la simulación de generación."
-    if project_index:
-        try:
-            query_engine = project_index.as_query_engine()
-            # Usar una consulta más general para las preguntas del chat
-            simulated_query = f"Basado en la conversación sobre la funcionalidad de {conversation_history[0].get('content', 'una nueva característica')}, ¿cuál es la información técnica más concisa y relevante del proyecto para la implementación?"
-            response = query_engine.query(simulated_query)
-            if response and response.response:
-                relevant_project_info = response.response
-            else:
-                relevant_project_info = "No se encontró información relevante del proyecto para esta consulta específica."
-        except Exception as e:
-            relevant_project_info = f"Error al recuperar información del proyecto: {str(e)}"
+    relevant_project_info = _get_relevant_project_info(project_index, conversation_history, "la implementación")
 
     # Generar el PRD usando el LLM
     prd_content = ""
@@ -347,17 +316,7 @@ async def generate_technical_plan(conversation_history: List[Dict[str, str]], pr
     """
     print("\n--- Generando Plan Técnico ---")
 
-    from llama_index.llms.google_genai import GoogleGenAI
-    from llama_index.core.prompts import PromptTemplate
-    from llama_index.llms.ollama import Ollama
-
-    llm = None
-    if llm_provider == "google":
-        llm = GoogleGenAI(model="models/gemini-2.5-flash", max_output_tokens=8000)
-    elif llm_provider == "ollama":
-        llm = Ollama(model="gemma3n:e2b", request_timeout=360.0)
-    else:
-        raise ValueError("Invalid LLM provider specified.")
+    llm = _get_llm(llm_provider)
 
     # Combinar todo el contexto de la conversación
     full_context = ""
@@ -366,49 +325,11 @@ async def generate_technical_plan(conversation_history: List[Dict[str, str]], pr
             full_context += f"{msg['role'].upper()}: {msg['content']}\n"
 
     # Plantilla para el plan técnico
-    technical_plan_template = PromptTemplate(
-        """Eres un asistente de IA que ayuda a los Product Managers a recopilar información para PRDs e Historias de Usuario, y también a generar planes técnicos de alto nivel.
-        Basado en el siguiente contexto de conversación con el PM y la información del proyecto indexada, genera un plan de acción técnico EXTREMADAMENTE CONCISO y directo.
-        El plan debe cubrir los siguientes puntos clave con la menor cantidad de palabras posible, utilizando un formato claro y listado.
 
-        El plan debe incluir:
-        - Cómo esta funcionalidad encaja en la arquitectura existente.
-        - Qué archivos o componentes existentes podrían verse afectados.
-        - Convenciones de nombres a seguir basadas en la base de código actual.
-        - Puntos de integración con funcionalidades existentes.
-        - Enfoque de implementación sugerido basado en patrones actuales.
-        - **Consideraciones Adicionales**: Menciona brevemente (1-2 frases por punto):
-            - Manejo de errores y casos límite relevantes para la funcionalidad.
-            - Implicaciones de rendimiento y experiencia de usuario (UX).
-            - Aspectos de seguridad.
-            - Estrategia de pruebas (ej. unitarias, integración, E2E).
+    technical_plan_prompt_content = _load_template_content("templates/prompts/technical_plan_prompt.txt")
+    technical_plan_template = PromptTemplate(technical_plan_prompt_content)
 
-        IMPORTANTE: Genera ÚNICAMENTE el contenido del plan técnico. No incluyas ningún saludo, introducción conversacional, o resumen de la conversación. Céntrate exclusivamente en el plan final.
-
-        PRD Generado:
-        {prd_content_for_tp}
-
-        Contexto de Conversación con el PM:
-        {conversation_context}
-
-        Información Relevante del Proyecto (si aplica):
-        {project_info}
-        """
-    )
-
-    relevant_project_info = "No se recuperó información específica del proyecto para la generación del plan técnico."
-    if project_index:
-        try:
-            query_engine = project_index.as_query_engine()
-            # Usar una consulta más general para el plan técnico
-            simulated_query = f"Basado en la conversación sobre la funcionalidad de {conversation_history[0].get('content', 'una nueva característica')}, ¿cuál es la información técnica más concisa y relevante del proyecto para la planificación de la implementación (arquitectura, componentes, patrones)?"
-            response = query_engine.query(simulated_query)
-            if response and response.response:
-                relevant_project_info = response.response
-            else:
-                relevant_project_info = "No se encontró información relevante del proyecto para esta consulta específica."
-        except Exception as e:
-            relevant_project_info = f"Error al recuperar información del proyecto para el plan técnico: {str(e)}"
+    relevant_project_info = _get_relevant_project_info(project_index, conversation_history, "la planificación de la implementación (arquitectura, componentes, patrones)")
 
     # Generar el plan técnico usando el LLM
     technical_plan_content = ""

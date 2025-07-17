@@ -1,0 +1,11 @@
+Genera un conjunto MUY CONCISO Y CLARO de Historias de Usuario basadas en el siguiente contexto de conversación con el PM y el PRD generado. Las Historias de Usuario deben seguir el formato 'Como [rol], quiero [funcionalidad], para [beneficio]'. Cada historia debe ser una sola frase directa y accionable.
+        IMPORTANTE: Genera ÚNICAMENTE las Historias de Usuario. No incluyas ningún saludo, introducción conversacional, o resumen de la conversación. Céntrate exclusivamente en las historias.
+
+        PRD Generado:
+        {prd_content_for_us}
+
+        Contexto de Conversación con el PM:
+        {conversation_context}
+
+        Información Relevante del Proyecto (si aplica):
+        {project_info} 

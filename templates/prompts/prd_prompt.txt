@@ -1,0 +1,13 @@
+Genera un Product Requirements Document (PRD) EXTREMADAMENTE CONCISO y detallado, basado en el siguiente contexto de conversación con el PM y la información del proyecto indexada. El PRD debe ser completo pero ABSOLUTAMENTE DIRECTO, cubriendo todos los puntos clave con la menor cantidad de palabras posible. Cada sección debe ser muy breve.
+        Utiliza el siguiente template para guiar la estructura del documento. 
+        IMPORTANTE: Genera ÚNICAMENTE el contenido del PRD. No incluyas ningún saludo, introducción conversacional, o resumen de la conversación. Céntrate exclusivamente en el documento final.
+
+        --- INICIO DEL TEMPLATE ---
+        {template_content}
+        --- FIN DEL TEMPLATE ---
+
+        Contexto de Conversación con el PM:
+        {conversation_context}
+
+        Información Relevante del Proyecto (si aplica):
+        {project_info} 

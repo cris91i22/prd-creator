@@ -11,7 +11,7 @@
             background-color: #f4f4f4; 
             color: #333; 
             display: grid; /* Use grid for main layout */
-            grid-template-columns: minmax(0, 1fr) 2fr minmax(0, 1fr); /* Three columns: left sidebar, main, right sidebar */
+            grid-template-columns: 1fr 1fr 1fr; /* Three equally sized columns */
             gap: 20px; /* Space between columns */
             padding: 20px;
             min-height: 100vh; /* Ensure it takes full viewport height */
@@ -33,13 +33,23 @@
             position: sticky; /* Make the sidebar sticky */
             top: 20px; /* Stick to 20px from the top of the viewport */
             align-self: start; /* Align to the start of the grid cell to allow sticky to work */
+            display: flex; /* Use flexbox for vertical stacking of sections */
+            flex-direction: column; /* Stack sections vertically */
         }
-        .sidebar h3 {
+        .sidebar-section {
+            margin-bottom: 20px; /* Space between sections in the sidebar */
+            border: 1px solid #cceeff;
+            border-radius: 5px;
+            background-color: #ffffff; /* White background for sections */
+            padding: 10px;
+        }
+        .sidebar-section-header {
             color: #0056b3;
             margin-top: 0;
             border-bottom: 1px solid #cceeff;
             padding-bottom: 10px;
             margin-bottom: 10px;
+            cursor: pointer; /* Indicate clickable header */
         }
         .sidebar-item {
             padding: 5px;
@@ -49,6 +59,25 @@
         }
         .sidebar-item:hover {
             background-color: #cceeff; /* Lighter blue on hover */
+        }
+        /* New styles for file tree */
+        .file-tree ul {
+            list-style-type: none;
+            padding-left: 15px;
+        }
+        .file-tree li {
+            margin: 5px 0;
+        }
+        .file-tree .folder {
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .file-tree .file {
+            color: #555;
+            cursor: pointer;
+        }
+        .file-tree .hidden-content {
+            display: none;
         }
         h1 { color: #0056b3; text-align: center; }
         textarea { width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px; resize: vertical; }
@@ -66,9 +95,13 @@
 <body>
     <!-- Left Sidebar for PRD and User Stories -->
     <div id="leftSidebar" class="sidebar hidden" style="grid-column: 1;">
-        <h3>PRD y Historias de Usuario</h3>
-        <div id="prdLinesContainer"></div>
-        <div id="userStoriesLinesContainer" style="margin-top: 20px;"></div>
+        <div class="sidebar-section">
+            <h3 class="sidebar-section-header" onclick="toggleSidebarSection('prdContent')">PRD y Historias de Usuario</h3>
+            <div id="prdContent" class="sidebar-section-content">
+                <div id="prdLinesContainer"></div>
+                <div id="userStoriesLinesContainer" style="margin-top: 20px;"></div>
+            </div>
+        </div>
     </div>
 
     <div class="container">
@@ -164,10 +197,22 @@
 
     </div>
 
-    <!-- Right Sidebar for Technical Plan -->
+    <!-- Right Sidebar for Technical Plan and Project File Tree -->
     <div id="rightSidebar" class="sidebar hidden" style="grid-column: 3;">
-        <h3>Plan Técnico</h3>
-        <div id="technicalPlanLinesContainer"></div>
+        <div class="sidebar-section">
+            <h3 class="sidebar-section-header" onclick="toggleSidebarSection('technicalPlanContent')">Plan Técnico</h3>
+            <div id="technicalPlanContent" class="sidebar-section-content">
+                <div id="technicalPlanLinesContainer"></div>
+            </div>
+        </div>
+
+        <div class="sidebar-section" style="margin-top: 20px; border: 2px solid red;" id="gitingestSection">
+            <h3 class="sidebar-section-header" onclick="toggleSidebarSection('gitingestTreeContent')">Estructura de Archivos del Proyecto</h3>
+            <div id="gitingestTreeContent" class="sidebar-section-content file-tree">
+                <!-- GitIngest file tree will be rendered here -->
+            </div>
+        </div>
+
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -203,6 +248,7 @@
         const prdLinesContainer = document.getElementById('prdLinesContainer');
         const userStoriesLinesContainer = document.getElementById('userStoriesLinesContainer');
         const technicalPlanLinesContainer = document.getElementById('technicalPlanLinesContainer');
+        const gitingestTreeContent = document.getElementById('gitingestTreeContent');
 
 
         let indexedProjectPath = '';
@@ -406,6 +452,8 @@
 
                 // Fetch and display structured documents for selection
                 await fetchAndDisplayStructuredDocuments();
+                // Fetch and display gitingest tree
+                await fetchAndDisplayGitIngestTree();
 
             } else {
                 prdOutput.textContent = `Error: ${result.message}`;
@@ -546,6 +594,96 @@
             // Append the selected text, adding a newline for better readability
             chatInput.value += (chatInput.value ? '\n' : '') + text;
             chatInput.focus(); // Focus the input for the user
+        }
+
+        // New functions for GitIngest file tree
+        async function fetchAndDisplayGitIngestTree() {
+            try {
+                console.log('Attempting to fetch gitingest tree...');
+                console.log('gitingestTreeContent element:', gitingestTreeContent); // Verify element is found
+                const response = await fetch(`/get_gitingest_tree?session_id=${currentSessionId}`);
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    console.log('Successfully fetched gitingest tree:', result.tree);
+                    renderGitIngestTree(result.tree, gitingestTreeContent);
+                } else {
+                    console.error('Error fetching gitingest tree:', result.message);
+                }
+            } catch (error) {
+                console.error('Connection error fetching gitingest tree:', error);
+            }
+        }
+
+        function renderGitIngestTree(node, containerElement) {
+            console.log('Entering renderGitIngestTree. Node:', node, 'Container:', containerElement);
+            if (!node) {
+                console.log('No node to render.');
+                return;
+            }
+
+            // Clear previous content only if it's the root call, to avoid clearing nested lists
+            if (containerElement === gitingestTreeContent) {
+                containerElement.innerHTML = '';
+            }
+
+            const ul = document.createElement('ul');
+            // Only append ul if it's not the initial empty container, or if it has children
+            // This prevents an empty <ul> tag if there's no tree data
+            if (node.children && node.children.length > 0 || node.type === 'file') {
+                containerElement.appendChild(ul);
+            }
+
+            function createNode(item) {
+                console.log('Creating node for item:', item);
+                const li = document.createElement('li');
+                if (item.type === 'dir') {
+                    const span = document.createElement('span');
+                    span.className = 'folder';
+                    span.textContent = item.name + '/';
+                    span.onclick = (event) => {
+                        event.stopPropagation(); // Prevent parent toggling
+                        const childrenUl = li.querySelector('ul');
+                        if (childrenUl) {
+                            childrenUl.classList.toggle('hidden-content');
+                        }
+                    };
+                    li.appendChild(span);
+                    if (item.children && item.children.length > 0) {
+                        const nestedUl = document.createElement('ul');
+                        nestedUl.className = 'hidden-content'; // Start collapsed
+                        item.children.forEach(child => {
+                            createNode(child).forEach(childElement => nestedUl.appendChild(childElement));
+                        });
+                        li.appendChild(nestedUl);
+                    }
+                } else if (item.type === 'file') {
+                    const span = document.createElement('span');
+                    span.className = 'file';
+                    span.textContent = item.name;
+                    span.onclick = () => insertSelectedText(item.path); // Use item.path for files
+                    li.appendChild(span);
+                }
+                return [li]; // Return as an array to be consistent with how it's used
+            }
+
+            // Render the root node's children directly if it's a directory
+            if (node.type === 'dir' && node.children) {
+                node.children.forEach(child => {
+                    createNode(child).forEach(childElement => ul.appendChild(childElement));
+                });
+            } else if (node.type === 'file') {
+                // If the root is a single file, just render it
+                createNode(node).forEach(childElement => ul.appendChild(childElement));
+            }
+        }
+
+        // General function to toggle sidebar sections
+        function toggleSidebarSection(contentId) {
+            const contentElement = document.getElementById(contentId);
+            if (contentElement) {
+                contentElement.classList.toggle('hidden-content');
+            }
         }
 
     </script>

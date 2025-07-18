@@ -22,6 +22,7 @@ project_index = None # Este será el índice global que se cargará/creará
 conversation_data: Dict[str, List[Dict[str, str]]] = {}
 developer_chat_history_data: Dict[str, List[Dict[str, str]]] = {} # Nuevo: Historial del chat de desarrolladores
 generated_documents_cache: Dict[str, Dict[str, str]] = {} # Nuevo: Cache para PRD, HU, Plan Técnico
+gitingest_tree_cache: Dict[str, Dict] = {} # Nuevo: Cache para el árbol de archivos de gitingest
 
 # Variable global para almacenar la ruta del proyecto indexado
 indexed_project_path: str = ""
@@ -37,14 +38,16 @@ class ProjectPathInput(BaseModel):
 
 @app.post("/index_project")
 async def index_project_endpoint(input_data: ProjectPathInput):
-    global project_index, indexed_project_path
+    global project_index, indexed_project_path, gitingest_tree_cache
     project_path = input_data.project_path
     force_index = input_data.force_index
+    session_id = "default_user_session" # Assuming a default session ID for now
 
     try:
         # Intentar cargar o crear el índice
-        project_index = await index_project(project_path, force_index)
+        project_index, gitingest_tree = await index_project(project_path, force_index)
         indexed_project_path = project_path # Guardar la ruta del proyecto indexado
+        gitingest_tree_cache[session_id] = gitingest_tree # Store the tree
         return JSONResponse(content={"message": "Proyecto indexado con éxito."})
     except Exception as e:
         return JSONResponse(content={"detail": f"Error durante la indexación: {str(e)}"}, status_code=500)
@@ -333,6 +336,15 @@ async def get_structured_documents_endpoint(session_id: str):
         "user_stories_lines": structured_user_stories,
         "technical_plan_lines": structured_technical_plan
     }
+
+@app.get("/get_gitingest_tree")
+async def get_gitingest_tree_endpoint(session_id: str):
+    global gitingest_tree_cache
+    tree_data = gitingest_tree_cache.get(session_id)
+    if not tree_data:
+        return JSONResponse(content={"status": "error", "message": "Árbol de gitingest no encontrado para la sesión."},
+                            status_code=404)
+    return JSONResponse(content={"status": "success", "tree": tree_data})
 
 # Para ejecutar esta aplicación, guarda este archivo como main.py y ejecuta:
 # uvicorn main:app --reload 

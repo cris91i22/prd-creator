@@ -48,10 +48,22 @@ async def index_project(project_path: str, force_index: bool = False):
                     embed_model=embed_model
                 )
                 print("Índice existente de ChromaDB cargado con éxito.")
-                return index
+                # We need to retrieve the original tree if we're loading from existing.
+                # For now, we'll return a placeholder or re-ingest if not found easily.
+                # A more robust solution would store the tree in ChromaDB as well.
+                # For this task, we'll assume a fresh ingest is fine for now if not found easily.
+                
+                # To simplify for now, if we loaded from existing, we don't have the tree readily available.
+                # In a real app, you might store it. For this feature, let's re-ingest to get the tree
+                # even if the index exists, or add a way to store/retrieve the tree.
+                # For simplicity, if we hit this, let's assume we re-ingest to get the tree.
+                # TODO: Improve this to actually load the tree from storage if index exists.
+                print("Re-ingesting project to retrieve file tree for existing index...")
+                summary, tree, gitingest_content = await ingest_async(project_path)
+                return index, tree
         except Exception as e:
             print(f"No se pudo cargar el índice existente o la colección no existe (error: {e}). Procediendo con la indexación.")
-            # Si hay un error al cargar, procederemos a re-indexar.
+            # If there's an error loading, we'll proceed to re-index.
 
     print("Creando o re-indexando el proyecto...")
     # Paso 1: Ejecutar gitingest
@@ -62,7 +74,12 @@ async def index_project(project_path: str, force_index: bool = False):
     except Exception as e:
         print(f"Error al ejecutar gitingest: {e}")
         gitingest_content = "Este es un contenido de fallback porque gitingest falló o no se pudo ejecutar. Asegúrate de que el directorio del proyecto exista y sea válido."
+        tree = {"name": "Error: Could not retrieve file tree.", "type": "dir", "children": []} # Fallback tree
     
+    # Ensure gitingest_content is a string, even if ingest_async somehow returns None
+    if gitingest_content is None:
+        gitingest_content = "No content extracted by gitingest."
+
     # Convertir el contenido de gitingest a un objeto Document de LlamaIndex
     documents = [Document(text=gitingest_content)]
 
@@ -94,7 +111,7 @@ async def index_project(project_path: str, force_index: bool = False):
         embed_model=embed_model
     )
     print("Proyecto indexado y embeddings almacenados en ChromaDB.")
-    return index
+    return index, tree
 
 def _is_initial_conversation_state(conversation_history: List[Dict[str, str]]) -> bool:
     """

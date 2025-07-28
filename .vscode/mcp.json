@@ -1,0 +1,21 @@
+{
+  "servers": { 
+    "geppettoapi": {
+      "type": "http",
+      "url": "https://iop-mcpgptxapi-moyaint.apps.axsv1ocp1.service.inditex.grp/mcp/"
+    },
+    "geppetto": {
+      "type": "http",
+      "url": "https://iop-mcpgptx-moyaint.apps.axsv1ocp1.service.inditex.grp/mcp"
+    },
+    "github": {
+      "type": "http",
+      "url": "https://api.githubcopilot.com/mcp/"
+    },
+    "playwright": {
+        "type": "command",
+        "command": "npx",
+        "args": ["@playwright/mcp@latest"]
+    }
+  }
+}
